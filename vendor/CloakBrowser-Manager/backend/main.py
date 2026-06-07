@@ -837,6 +837,71 @@ async def vnc_proxy(websocket: WebSocket, profile_id: str):
             logger.debug("VNC proxy: websocket.close() failed: %s", exc)
 
 
+@app.websocket("/api/profiles/{profile_id}/audio")
+async def audio_stream(websocket: WebSocket, profile_id: str):
+    """Stream browser audio as WebM/Opus from the PulseAudio monitor sink."""
+    if not await _check_websocket_origin(websocket):
+        return
+
+    running = browser_mgr.running.get(profile_id)
+    if not running:
+        await websocket.close(code=4004, reason="Profile not running")
+        return
+
+    if not shutil.which("ffmpeg"):
+        await websocket.close(code=1011, reason="ffmpeg unavailable")
+        return
+
+    await websocket.accept()
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "pulse",
+        "-i",
+        "rbi_default.monitor",
+        "-ac",
+        "2",
+        "-ar",
+        "48000",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "64k",
+        "-f",
+        "webm",
+        "pipe:1",
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    try:
+        assert process.stdout is not None
+        while True:
+            chunk = await process.stdout.read(16 * 1024)
+            if not chunk:
+                break
+            await websocket.send_bytes(chunk)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except TimeoutError:
+                process.kill()
+        try:
+            await websocket.close()
+        except Exception as exc:
+            logger.debug("Audio stream: websocket.close() failed: %s", exc)
+
+
 # ── CDP WebSocket Proxy ──────────────────────────────────────────────────────
 # Simple bidirectional passthrough — CDP is standard JSON over WebSocket,
 # no protocol translation needed (unlike VNC which requires RFB filtering).

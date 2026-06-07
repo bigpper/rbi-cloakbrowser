@@ -46,6 +46,8 @@ class RbiSession(Base):
     manager_profile_id: Mapped[str] = mapped_column(String(64), nullable=False)
     target_url_encrypted: Mapped[str | None] = mapped_column(Text)
     viewer_token_hash: Mapped[str | None] = mapped_column(String(128), unique=True)
+    audio_token_hash: Mapped[str | None] = mapped_column(String(128), unique=True)
+    display_profile: Mapped[str] = mapped_column(String(32), nullable=False, default="high")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
     cdp_endpoint_internal: Mapped[str | None] = mapped_column(Text)
     viewer_endpoint_internal: Mapped[str | None] = mapped_column(Text)

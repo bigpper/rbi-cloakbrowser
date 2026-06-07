@@ -51,6 +51,8 @@ def upgrade() -> None:
         sa.Column("manager_profile_id", sa.String(length=64), nullable=False),
         sa.Column("target_url_encrypted", sa.Text()),
         sa.Column("viewer_token_hash", sa.String(length=128), unique=True),
+        sa.Column("audio_token_hash", sa.String(length=128), unique=True),
+        sa.Column("display_profile", sa.String(length=32), nullable=False, server_default="high"),
         sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("cdp_endpoint_internal", sa.Text()),
         sa.Column("viewer_endpoint_internal", sa.Text()),

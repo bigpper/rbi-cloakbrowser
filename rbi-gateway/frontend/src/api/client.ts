@@ -13,6 +13,8 @@ export interface CreateSessionResponse {
   status: string;
 }
 
+export type DisplayProfile = "high" | "medium" | "low";
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     headers: { "Content-Type": "application/json", "X-User-Id": "demo-user" },
@@ -34,7 +36,7 @@ export const api = {
     }),
   deleteProfile: (id: string) =>
     request<{ ok: boolean }>(`/api/rbi/profiles/${id}`, { method: "DELETE" }),
-  createSession: (targetUrl: string, profileId?: string) =>
+  createSession: (targetUrl: string, profileId?: string, displayProfile: DisplayProfile = "high") =>
     request<CreateSessionResponse>("/api/rbi/sessions", {
       method: "POST",
       body: JSON.stringify({
@@ -42,6 +44,7 @@ export const api = {
         profile_id: profileId || null,
         mode: "persistent",
         ttl_minutes: 60,
+        display_profile: displayProfile,
       }),
     }),
   navigate: (sessionId: string, targetUrl: string) =>
@@ -52,6 +55,16 @@ export const api = {
   stopSession: (sessionId: string) =>
     request<{ session_id: string; status: string }>(`/api/rbi/sessions/${sessionId}/stop`, {
       method: "POST",
+    }),
+  insertText: (sessionId: string, text: string) =>
+    request<{ session_id: string; status: string }>(`/api/rbi/sessions/${sessionId}/text`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    }),
+  setDisplayProfile: (sessionId: string, displayProfile: DisplayProfile) =>
+    request<{ session_id: string; status: string }>(`/api/rbi/sessions/${sessionId}/display-profile`, {
+      method: "POST",
+      body: JSON.stringify({ display_profile: displayProfile }),
     }),
   reload: (sessionId: string) =>
     request<{ session_id: string; status: string }>(`/api/rbi/sessions/${sessionId}/reload`, {

@@ -31,7 +31,12 @@ def create_app() -> FastAPI:
 
     store = InMemorySessionStore()
     manager_client = ManagerClient(settings.manager_base_url, settings.cloak_manager_auth_token)
-    cdp_service = CdpService()
+    cdp_headers = (
+        {"Authorization": f"Bearer {settings.cloak_manager_auth_token}"}
+        if settings.cloak_manager_auth_token
+        else None
+    )
+    cdp_service = CdpService(cdp_headers=cdp_headers)
     app.state.store = store
     app.state.manager_client = manager_client
     app.state.cdp_service = cdp_service
@@ -104,6 +109,64 @@ async def viewer_ws(websocket: WebSocket, viewer_token: str):
                 task.result()
     except Exception as exc:
         logger.warning("viewer websocket proxy failed for session %s: %s", session.id, type(exc).__name__)
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@app.websocket("/audio-ws/{viewer_token}")
+async def audio_ws(websocket: WebSocket, viewer_token: str):
+    """Authenticate viewer token, then proxy WebM/Opus audio frames from Manager."""
+    try:
+        session = websocket.app.state.session_service.get_session_by_viewer_token(viewer_token)
+    except PermissionError:
+        await websocket.close(code=4401, reason="Invalid viewer token")
+        return
+
+    await websocket.accept()
+    manager_ws_url = (
+        settings.manager_base_url.replace("http://", "ws://").replace("https://", "wss://")
+        + f"/api/profiles/{session.manager_profile_id}/audio"
+    )
+    headers = {"Authorization": f"Bearer {settings.cloak_manager_auth_token}"}
+
+    try:
+        async with websockets.connect(
+            manager_ws_url,
+            additional_headers=headers,
+            max_size=None,
+            ping_interval=None,
+            ping_timeout=None,
+        ) as manager_ws:
+            async def client_disconnect_watch() -> None:
+                try:
+                    while True:
+                        msg = await websocket.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            break
+                except WebSocketDisconnect:
+                    pass
+
+            async def manager_to_client() -> None:
+                async for msg in manager_ws:
+                    if isinstance(msg, bytes):
+                        await websocket.send_bytes(msg)
+                    else:
+                        await websocket.send_text(msg)
+
+            tasks = [
+                asyncio.create_task(client_disconnect_watch()),
+                asyncio.create_task(manager_to_client()),
+            ]
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in pending:
+                task.cancel()
+            for task in done:
+                task.result()
+    except Exception as exc:
+        logger.warning("audio websocket proxy failed for session %s: %s", session.id, type(exc).__name__)
     finally:
         try:
             await websocket.close()

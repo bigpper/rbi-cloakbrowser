@@ -17,10 +17,13 @@ class ManagerClientProtocol(Protocol):
     async def create_profile(self, payload: dict) -> dict: ...
     async def launch_profile(self, manager_profile_id: str) -> dict: ...
     async def stop_profile(self, manager_profile_id: str) -> None: ...
+    def get_cdp_endpoint(self, manager_profile_id: str) -> str: ...
 
 
 class CdpServiceProtocol(Protocol):
     async def open_url(self, session: "StoredSession", target_url: str) -> None: ...
+    async def prepare_single_page_session(self, session: "StoredSession") -> None: ...
+    async def insert_text(self, session: "StoredSession", text: str) -> None: ...
     async def reload(self, session: "StoredSession") -> None: ...
     async def go_back(self, session: "StoredSession") -> None: ...
     async def go_forward(self, session: "StoredSession") -> None: ...
@@ -43,6 +46,8 @@ class StoredSession:
     manager_profile_id: str
     target_url_encrypted: str
     viewer_token_hash: str | None
+    audio_token_hash: str | None
+    display_profile: str
     status: str
     cdp_endpoint_internal: str | None
     viewer_endpoint_internal: str | None
@@ -92,6 +97,12 @@ class InMemorySessionStore:
                 return session
         return None
 
+    def get_session_by_audio_token_hash(self, audio_token_hash: str) -> StoredSession | None:
+        for session in self.sessions.values():
+            if session.audio_token_hash == audio_token_hash:
+                return session
+        return None
+
 
 def _hash_secret(value: str) -> str:
     salt = os.getenv("TOKEN_HASH_SECRET", "dev-token-hash-salt")
@@ -103,6 +114,23 @@ def _encrypt_for_storage(value: str) -> str:
     # encoded until the database encryption service is wired to FIELD_ENCRYPTION_KEY.
     encoded = base64.urlsafe_b64encode(value.encode("utf-8")).decode("ascii")
     return f"enc:v1:{encoded}"
+
+
+DISPLAY_PROFILES = {
+    "high": {"width": 1280, "height": 720},
+    "medium": {"width": 1024, "height": 576},
+    "low": {"width": 854, "height": 480},
+}
+
+
+def _launch_args_for_display(width: int, height: int) -> list[str]:
+    return [
+        "--app=about:blank",
+        f"--window-size={width},{height}",
+        "--start-maximized",
+        "--disable-session-crashed-bubble",
+        "--no-first-run",
+    ]
 
 
 class SessionService:
@@ -119,10 +147,11 @@ class SessionService:
     async def create_session(self, user_id: str, request: SessionCreateRequest) -> SessionCreateResponse:
         target_url = validate_target_url(request.target_url)
         profile = await self._get_or_create_profile(user_id, request)
-        launch = await self.manager_client.launch_profile(profile.manager_profile_id)
+        await self.manager_client.launch_profile(profile.manager_profile_id)
 
         now = datetime.now(UTC)
         viewer_token = secrets.token_urlsafe(32)
+        audio_token = secrets.token_urlsafe(32)
         session = StoredSession(
             id=str(uuid.uuid4()),
             user_id=user_id,
@@ -130,14 +159,17 @@ class SessionService:
             manager_profile_id=profile.manager_profile_id,
             target_url_encrypted=_encrypt_for_storage(target_url),
             viewer_token_hash=_hash_secret(viewer_token),
+            audio_token_hash=_hash_secret(audio_token),
+            display_profile=request.display_profile,
             status="running",
-            cdp_endpoint_internal=launch.get("cdp_url"),
+            cdp_endpoint_internal=self.manager_client.get_cdp_endpoint(profile.manager_profile_id),
             viewer_endpoint_internal=f"/api/profiles/{profile.manager_profile_id}/vnc",
             expires_at=now + timedelta(minutes=request.ttl_minutes),
             last_active_at=now,
             created_at=now,
         )
         self.store.create_session(session)
+        await self.cdp_service.prepare_single_page_session(session)
         await self.cdp_service.open_url(session, target_url)
 
         return SessionCreateResponse(
@@ -155,12 +187,32 @@ class SessionService:
         await self.cdp_service.open_url(session, validated)
         return SessionStatusResponse(session_id=session.id, status="running", expires_at=session.expires_at)
 
+    async def insert_text(self, user_id: str, session_id: str, text: str) -> SessionStatusResponse:
+        session = self._require_running_session(user_id, session_id)
+        await self.cdp_service.insert_text(session, text)
+        session.last_active_at = datetime.now(UTC)
+        return SessionStatusResponse(session_id=session.id, status="running", expires_at=session.expires_at)
+
+    async def set_display_profile(
+        self,
+        user_id: str,
+        session_id: str,
+        display_profile: str,
+    ) -> SessionStatusResponse:
+        session = self._require_running_session(user_id, session_id)
+        if display_profile not in DISPLAY_PROFILES:
+            raise ValueError("Unsupported display profile")
+        session.display_profile = display_profile
+        session.last_active_at = datetime.now(UTC)
+        return SessionStatusResponse(session_id=session.id, status="running", expires_at=session.expires_at)
+
     async def stop_session(self, user_id: str, session_id: str) -> SessionStatusResponse:
         session = self._require_session(user_id, session_id)
         if session.status == "running":
             await self.manager_client.stop_profile(session.manager_profile_id)
         session.status = "stopped"
         session.viewer_token_hash = None
+        session.audio_token_hash = None
         session.stopped_at = datetime.now(UTC)
         return SessionStatusResponse(session_id=session.id, status="stopped", expires_at=session.expires_at)
 
@@ -186,6 +238,13 @@ class SessionService:
         session.last_active_at = datetime.now(UTC)
         return session
 
+    def get_session_by_audio_token(self, audio_token: str) -> StoredSession:
+        session = self.store.get_session_by_audio_token_hash(_hash_secret(audio_token))
+        if not session or session.status != "running" or session.expires_at <= datetime.now(UTC):
+            raise PermissionError("Audio token is invalid")
+        session.last_active_at = datetime.now(UTC)
+        return session
+
     async def _get_or_create_profile(self, user_id: str, request: SessionCreateRequest) -> StoredProfile:
         if request.profile_id:
             profile = self.store.get_profile_for_user(request.profile_id, user_id)
@@ -193,12 +252,14 @@ class SessionService:
                 raise PermissionError("Profile not found")
             return profile
 
+        display = DISPLAY_PROFILES[request.display_profile]
         manager_profile = await self.manager_client.create_profile(
             {
                 "name": f"RBI Profile {uuid.uuid4().hex[:8]}",
-                "screen_width": 1280,
-                "screen_height": 720,
+                "screen_width": display["width"],
+                "screen_height": display["height"],
                 "headless": False,
+                "launch_args": _launch_args_for_display(display["width"], display["height"]),
             }
         )
         return self.store.create_profile(

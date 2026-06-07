@@ -10,6 +10,12 @@ pkill -f 'cloakbrowser.*chrome' 2>/dev/null || true
 pkill -f 'chromium.*fingerprint' 2>/dev/null || true
 pkill -f xclip 2>/dev/null || true
 
+# Start a virtual audio sink. noVNC carries only pixels/input, so browser audio
+# is captured separately from PulseAudio and streamed by the audio endpoint.
+pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+pactl load-module module-null-sink sink_name=rbi_default sink_properties=device.description=RBI_Default_Sink >/dev/null 2>&1 || true
+pactl set-default-sink rbi_default >/dev/null 2>&1 || true
+
 # Clean Chrome lock files left on the persistent volume
 find /data/profiles -maxdepth 2 -name 'SingletonLock' -delete 2>/dev/null || true
 find /data/profiles -maxdepth 2 -name 'SingletonCookie' -delete 2>/dev/null || true

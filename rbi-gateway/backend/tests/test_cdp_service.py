@@ -7,6 +7,16 @@ from app.services.session_service import StoredSession
 class FakePage:
     def __init__(self) -> None:
         self.actions: list[tuple[str, str | None]] = []
+        self.closed = False
+        self.evaluated_scripts: list[str] = []
+        self.keyboard = self.FakeKeyboard(self)
+
+    class FakeKeyboard:
+        def __init__(self, page: "FakePage") -> None:
+            self.page = page
+
+        async def insert_text(self, text: str) -> None:
+            self.page.actions.append(("insert_text", text))
 
     async def goto(self, url: str, wait_until: str = "domcontentloaded") -> None:
         self.actions.append(("goto", url))
@@ -23,20 +33,30 @@ class FakePage:
     async def title(self) -> str:
         return "Remote Title"
 
+    async def close(self) -> None:
+        self.closed = True
+
+    async def evaluate(self, script: str) -> None:
+        self.evaluated_scripts.append(script)
+
 
 class FakeContext:
-    def __init__(self, page: FakePage) -> None:
-        self.pages = [page]
+    def __init__(self, page: FakePage, extra_pages: list[FakePage] | None = None) -> None:
+        self.pages = [page, *(extra_pages or [])]
+        self.init_scripts: list[str] = []
 
     async def new_page(self) -> FakePage:
         page = FakePage()
         self.pages.append(page)
         return page
 
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
+
 
 class FakeBrowser:
-    def __init__(self, page: FakePage) -> None:
-        self.contexts = [FakeContext(page)]
+    def __init__(self, page: FakePage, extra_pages: list[FakePage] | None = None) -> None:
+        self.contexts = [FakeContext(page, extra_pages)]
 
 
 def fake_session() -> StoredSession:
@@ -47,6 +67,8 @@ def fake_session() -> StoredSession:
         manager_profile_id="manager-profile-1",
         target_url_encrypted="enc",
         viewer_token_hash="hash",
+        audio_token_hash="audio-hash",
+        display_profile="high",
         status="running",
         cdp_endpoint_internal="http://manager/api/profiles/manager-profile-1/cdp",
         viewer_endpoint_internal="/api/profiles/manager-profile-1/vnc",
@@ -72,6 +94,38 @@ async def test_open_url_connects_over_internal_cdp_and_navigates_page() -> None:
 
     assert connected == ["http://manager/api/profiles/manager-profile-1/cdp"]
     assert page.actions == [("goto", "https://example.com")]
+
+
+@pytest.mark.asyncio
+async def test_prepare_single_page_session_closes_extra_pages_and_blocks_new_windows() -> None:
+    page = FakePage()
+    extra = FakePage()
+
+    async def connector(endpoint: str):
+        return FakeBrowser(page, [extra])
+
+    service = CdpService(connect_over_cdp=connector)
+
+    await service.prepare_single_page_session(fake_session())
+
+    context = (await connector("ignored")).contexts[0]
+    assert extra.closed is True
+    assert "window.open" in page.evaluated_scripts[0]
+    assert "target" in page.evaluated_scripts[0]
+
+
+@pytest.mark.asyncio
+async def test_insert_text_uses_keyboard_insert_text() -> None:
+    page = FakePage()
+
+    async def connector(endpoint: str):
+        return FakeBrowser(page)
+
+    service = CdpService(connect_over_cdp=connector)
+
+    await service.insert_text(fake_session(), "中文输入")
+
+    assert page.actions == [("insert_text", "中文输入")]
 
 
 @pytest.mark.asyncio
