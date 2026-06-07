@@ -1,0 +1,98 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #1f2937;
+  background: #111827;
+}
+
+.container {
+  width: min(960px, calc(100vw - 32px));
+  margin: 48px auto;
+}
+
+.card {
+  background: #111827;
+  border: 1px solid #263244;
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.field {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #020617;
+  color: #e5e7eb;
+}
+
+.button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.button.secondary {
+  background: #334155;
+}
+
+.button.danger {
+  background: #dc2626;
+}
+
+.viewer-layout {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #020617;
+}
+
+.viewer-canvas {
+  flex: 1;
+  min-height: 0;
+  background: black;
+  overflow: hidden;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.error {
+  color: #fca5a5;
+}

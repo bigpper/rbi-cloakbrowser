@@ -1,0 +1,70 @@
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    command: >
+      /bin/sh -c "mkdir -p /etc/nginx/certs &&
+      if [ ! -f /etc/nginx/certs/fullchain.pem ]; then
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048
+      -keyout /etc/nginx/certs/privkey.pem
+      -out /etc/nginx/certs/fullchain.pem
+      -subj '/CN=localhost';
+      fi &&
+      nginx -g 'daemon off;'"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - rbi-gateway-backend
+      - rbi-gateway-frontend
+    restart: unless-stopped
+
+  rbi-gateway-backend:
+    build: ./rbi-gateway/backend
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      - postgres
+      - redis
+      - cloakbrowser-manager
+    restart: unless-stopped
+
+  rbi-gateway-frontend:
+    build: ./rbi-gateway/frontend
+    depends_on:
+      - rbi-gateway-backend
+    restart: unless-stopped
+
+  cloakbrowser-manager:
+    build: ./vendor/CloakBrowser-Manager
+    expose:
+      - "8080"
+    volumes:
+      - cloakprofiles:/data
+    environment:
+      - AUTH_TOKEN=${CLOAK_MANAGER_AUTH_TOKEN:-change-me-manager-internal-token}
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-rbi_gateway}
+      - POSTGRES_USER=${POSTGRES_USER:-rbi_gateway}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-change-me-postgres-password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    expose:
+      - "6379"
+    restart: unless-stopped
+
+volumes:
+  cloakprofiles:
+  pgdata:

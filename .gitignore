@@ -1,0 +1,47 @@
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Node.js / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+.npm
+.eslintcache
+
+# Docker / runtime data
+*.log
+logs/
+
+# TLS certificates (generated locally)
+nginx/certs/
+*.pem
+*.key
+*.crt
+
+# OS and editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Cursor
+.cursor/
