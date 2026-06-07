@@ -1,6 +1,0 @@
-[submodule "vendor/CloakBrowser"]
-	path = vendor/CloakBrowser
-	url = https://github.com/CloakHQ/CloakBrowser.git
-[submodule "vendor/CloakBrowser-Manager"]
-	path = vendor/CloakBrowser-Manager
-	url = https://github.com/CloakHQ/CloakBrowser-Manager.git
